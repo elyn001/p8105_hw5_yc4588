@@ -1,0 +1,207 @@
+---
+title: "p8105_hw5_yc4588"
+author: "Yining Cao"
+date: "2024-11-10"
+output:  
+  github_document:
+    toc: true
+    toc_depth: 2
+---
+
+### Load necessary packages
+```{r setup, include=FALSE}
+library(broom)
+library(knitr)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(purrr)
+```
+
+## Problem 1：Birthday Simulation
+```{r}
+set.seed(123)
+
+shared_birthday =  function(group_size) {
+  birthdays =  sample(1:365, group_size, replace = TRUE)
+  return(length(unique(birthdays)) < group_size)
+}
+
+# Run simulations and compute probabilities
+birthday_simulation <- function(runs = 10000, max_group_size = 50) {
+  probabilities =  numeric(max_group_size - 1)
+  
+  for (group_size in 2:max_group_size) {
+    results =  replicate(runs, shared_birthday(group_size))
+    probabilities[group_size - 1] =  mean(results)
+  }
+  
+  return(probabilities)
+}
+
+probabilities =  birthday_simulation()
+
+group_sizes = 2:50
+plot(group_sizes, probabilities, type = "o", col = "pink", pch = 16, 
+     main = "Probability of At Least Two People Sharing a Birthday",
+     xlab = "Group Size", ylab = "Probability of Shared Birthday")
+abline(h = 0.5, col = "skyblue", lty = 2)
+legend("bottomright", legend = c("Simulation", "50% Probability"), 
+       col = c("pink", "skyblue"), lty = c(1, 2), pch = c(16, NA))
+
+```
+
+- The function and figure illustrate the probability that at least two people in a room share a birthday, with the number of people ranging from 2 to 50. As the number of individuals in the room increases, the likelihood of a shared birthday gradually rises. By the time there are 50 people, the probability approaches 100%.
+
+## Problem 2 : Explore power in a one-sample t-test
+### Conduct a simulation to explore power in a one-sample t-test
+```{r}
+set.seed(123)
+
+power_function = function(mu) {
+  n = 30
+  sigma = 5
+  sample_data = rnorm(n, mean = mu, sd = sigma)
+  test_result = t.test(sample_data, mu = 0) |>
+    broom::tidy() |>
+    select(estimate, p.value)
+    
+  return(test_result)
+}
+
+mul_mu =
+  expand_grid(
+  mu = 0:6,
+  iter = 1:5000
+) |>
+  mutate(result = map(mu, power_function)) |>
+  unnest(result)
+
+power_results <- mul_mu |>
+  group_by(mu) |>
+  summarize(power = mean(p.value < 0.05))
+
+ggplot(power_results, aes(x = mu, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Power of the t-test vs True Mean (mu)",
+    x = "True Mean (mu)",
+    y = "Power"
+  ) +
+  theme_minimal()
+```
+
+- The resulting plot illustrates how power increases as the true mean (μ) deviates further from 0, showing a stronger ability to detect larger effect sizes. When the true mean approaches 5, the power of the t-test is nearly 100%, indicating a high probability of correctly rejecting the null hypothesis.
+
+### Plot showing that  the average estimate of 𝜇̂ vs. the true 𝜇in all samples and in samples where the null hypothesis is rejected
+```{r}
+average_estimates <- mul_mu |>
+  group_by(mu) |>
+  summarize(
+    avg_mu_hat_all = mean(estimate),
+    avg_mu_hat_rejected = mean(estimate[p.value < 0.05], na.rm = TRUE)
+  )
+
+average_estimates_long <- average_estimates |>
+  pivot_longer(
+    cols = c(avg_mu_hat_all, avg_mu_hat_rejected),
+    names_to = "type",
+    values_to = "avg_mu_hat"
+  ) |>
+  mutate(type = recode(type,
+                       "avg_mu_hat_all" = "All Samples",
+                       "avg_mu_hat_rejected" = "Rejected Nulls"))
+
+# Create plot with legend
+ggplot(average_estimates_long, aes(x = mu, y = avg_mu_hat, color = type)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(
+    title = "Average Estimate of μ̂ vs True μ",
+    x = "True μ",
+    y = "Average μ̂",
+    color = "Sample Type"
+  ) +
+  theme_minimal()
+```
+
+- No, they are not approximately equal. When the null hypothesis is rejected, the average estimate of μ tends to be higher than the true value of μ for smaller values of μ, but it approaches the true μ as μ increases. This happens due to selection bias: rejection of the null occurs only when the sample mean is unusually high, leading to an overestimate of μ in cases where the true μ is small.
+
+## Problem 3: Analysis of Homicide Data
+### Import the dataset
+```{r}
+homicide_data = read_csv("homicide-data.csv")
+```
+- The dataset contains `r nrow(homicide_data)` rows and `r ncol(homicide_data)` columns.
+- Variables in the dataset include: `r names(homicide_data) |> paste(collapse = ", ")`.
+
+### To obtain the total number of homicides and the number of unsolved homicides.
+```{r}
+homicide_data <- homicide_data |>
+  mutate(state = replace(state, state == "wI", "WI"),
+         city_state = str_c(city, state, sep = ", "),
+         resolution = case_when(
+           disposition == "Closed without arrest" ~ "unsolved",
+           disposition == "Open/No arrest" ~ "unsolved",
+           disposition == "Closed by arrest" ~ "solved")) |>
+  relocate(city_state, resolution) |> 
+  filter(city_state != "Tulsa, AL") 
+```
+- "Tulsa, AL" is removed from the dataset because it may be a typo.
+
+### To estimate the proportion of homicides that are unsolved
+```{r}
+homicide_df = 
+  homicide_data |> 
+  group_by(city_state) |> 
+  summarize(
+    total = n(),
+    sum_unsolved = sum(resolution == "unsolved")
+  )
+
+knitr::kable(homicide_df)
+```
+
+### Run a prop.test for the city of Balitmore, MD
+```{r}
+prop_test = prop.test(
+  homicide_df |> filter(city_state == "Baltimore, MD") |> pull(sum_unsolved), 
+  homicide_df |> filter(city_state == "Baltimore, MD") |> pull(total)) |>
+  broom::tidy()
+prop_test
+
+ep_ci = prop_test |>
+  select(estimate, lower_CI = conf.low, upper_CI = conf.high)
+knitr::kable(ep_ci, digits = 3)
+
+```
+
+### To estimate the proportion of homicides that are unsolved in each city
+
+```{r}
+prop_test_results = homicide_df |>
+  mutate(
+    prop_tests = map2(sum_unsolved, total, \(x, y) prop.test(x = x, n = y)),
+    prop_tests_tidy = map(prop_tests, broom::tidy)) |>
+  select(-prop_tests) |> 
+  unnest(prop_tests_tidy) |> 
+  select(city_state, estimate, conf.low, conf.high) |>
+  mutate(city_state = fct_reorder(city_state, estimate))
+
+knitr::kable(prop_test_results, digits = 3)
+```
+
+### Plot showing the estimate (and CI) of the proportion of unsolved homicides in each city
+```{r}
+prop_test_results |> 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point(color = "skyblue", size = 1) +
+  coord_flip() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), color = "red") +
+  labs(title = "Estimated Proportion of Unsolved Homicides in Each City",
+       x = "City, State",
+       y = "Estimated Proportion of Unsolved Homicides") +
+  theme_minimal()
+```
+
