@@ -136,7 +136,7 @@ homicide_data = read_csv("homicide-data.csv")
 - The dataset contains `r nrow(homicide_data)` rows and `r ncol(homicide_data)` columns.
 - Variables in the dataset include: `r names(homicide_data) |> paste(collapse = ", ")`.
 
-### To obtain the total number of homicides and the number of unsolved homicides.
+### Clean the dataset and create a _city_state_ variable
 ```{r}
 homicide_data <- homicide_data |>
   mutate(state = replace(state, state == "wI", "WI"),
@@ -148,9 +148,8 @@ homicide_data <- homicide_data |>
   relocate(city_state, resolution) |> 
   filter(city_state != "Tulsa, AL") 
 ```
-- "Tulsa, AL" is removed from the dataset because it may be a typo.
 
-### To estimate the proportion of homicides that are unsolved
+### To obtain the total number of homicides and the number of unsolved homicides
 ```{r}
 homicide_df = 
   homicide_data |> 
